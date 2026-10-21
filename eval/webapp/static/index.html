@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en" class="bg-slate-50">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Activiity — RAG Eval Control Panel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="min-h-screen text-slate-800">
+
+<div x-data="app()" x-init="init()" class="max-w-7xl mx-auto p-6 space-y-6">
+
+  <!-- ░░ header ░░ -->
+  <header class="flex items-center justify-between border-b border-slate-200 pb-4">
+    <div>
+      <h1 class="text-2xl font-bold">Activiity — RAG Eval Control Panel</h1>
+      <p class="text-sm text-slate-500">
+        Configure, run and analyse evaluations of the Agentic RAG module.
+      </p>
+    </div>
+    <nav class="flex gap-2">
+      <template x-for="t in tabs" :key="t.id">
+        <button @click="tab=t.id"
+                :class="tab===t.id ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 border border-slate-300'"
+                class="px-3 py-1.5 text-sm rounded-lg font-medium hover:shadow"
+                x-text="t.label"></button>
+      </template>
+    </nav>
+  </header>
+
+
+  <!-- ▓▓▓▓▓▓ SETTINGS ▓▓▓▓▓▓ -->
+  <section x-show="tab==='settings'" class="space-y-6">
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+      <h2 class="font-semibold text-lg">🎯 Target Agentic RAG (under evaluation)</h2>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <label class="block">
+          <span class="text-sm font-medium">LLM provider</span>
+          <select x-model="cfg.target_llm_provider" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="openrouter">OpenRouter (cloud)</option>
+            <option value="ollama">Ollama (on-premises)</option>
+          </select>
+        </label>
+
+        <template x-if="cfg.target_llm_provider==='openrouter'">
+          <label class="block">
+            <span class="text-sm font-medium">OpenRouter model</span>
+            <input x-model="cfg.target_openrouter_model" list="or-models"
+                   class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="anthropic/claude-sonnet-4-6">
+            <datalist id="or-models">
+              <template x-for="m in orModels" :key="m"><option :value="m"></option></template>
+            </datalist>
+          </label>
+        </template>
+
+        <template x-if="cfg.target_llm_provider==='ollama'">
+          <label class="block">
+            <span class="text-sm font-medium">Ollama base URL</span>
+            <input x-model="cfg.target_ollama_base_url"
+                   class="mt-1 w-full border rounded-lg px-3 py-2">
+          </label>
+        </template>
+
+        <template x-if="cfg.target_llm_provider==='ollama'">
+          <label class="block">
+            <span class="text-sm font-medium">Ollama model</span>
+            <div class="flex gap-2">
+              <input x-model="cfg.target_ollama_model"
+                     class="mt-1 flex-1 border rounded-lg px-3 py-2">
+              <button @click="testOllama()" class="mt-1 bg-slate-700 text-white px-3 rounded-lg text-sm">Test</button>
+            </div>
+          </label>
+        </template>
+
+        <label class="block">
+          <span class="text-sm font-medium">Embedding provider</span>
+          <select x-model="cfg.target_embed_provider" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="openai">OpenAI (cloud)</option>
+            <option value="ollama">Ollama (local)</option>
+            <option value="hf">HuggingFace (inference API)</option>
+          </select>
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-medium">Embedding model</span>
+          <input x-model="cfg.target_embed_model" class="mt-1 w-full border rounded-lg px-3 py-2">
+        </label>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+      <h2 class="font-semibold text-lg">⚖️  Judge LLM (for Ragas)</h2>
+
+      <div class="grid md:grid-cols-2 gap-4">
+        <label class="block">
+          <span class="text-sm font-medium">Judge model</span>
+          <select x-model="cfg.judge_model" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="anthropic/claude-sonnet-4-6">⭐ anthropic/claude-sonnet-4-6 — best for French, primary recommendation</option>
+            <option value="openai/gpt-4o">openai/gpt-4o — cross-check</option>
+            <option value="openai/gpt-4o-mini">openai/gpt-4o-mini — 10× cheaper, CI bulk</option>
+            <option value="qwen/qwen-2.5-72b-instruct">qwen-2.5-72b — open-weight</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="text-sm font-medium">Judge temperature (keep 0.0 for reproducibility)</span>
+          <input type="number" step="0.1" min="0" max="1" x-model.number="cfg.judge_temperature"
+                 class="mt-1 w-full border rounded-lg px-3 py-2">
+        </label>
+      </div>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+      <h2 class="font-semibold text-lg"> API Keys</h2>
+
+      <label class="block">
+        <span class="text-sm font-medium">OpenRouter key
+          <span class="text-xs text-slate-500" x-text="'currently: ' + (cfg.openrouter_api_key || '(unset)')"></span>
+        </span>
+        <div class="flex gap-2 mt-1">
+          <input type="password" x-model="newKeys.openrouter_api_key"
+                 class="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
+                 placeholder="sk-or-v1-...">
+          <button @click="testOpenRouter()"
+                  class="bg-slate-700 text-white px-3 rounded-lg text-sm">Test key</button>
+        </div>
+        <p x-show="openrouterStatus" class="text-xs mt-1" :class="openrouterStatus?.ok ? 'text-green-600' : 'text-red-600'"
+           x-text="openrouterStatus?.msg"></p>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-medium">OpenAI key (embeddings)
+          <span class="text-xs text-slate-500" x-text="'currently: ' + (cfg.openai_api_key || '(unset)')"></span>
+        </span>
+        <input type="password" x-model="newKeys.openai_api_key"
+               class="mt-1 w-full border rounded-lg px-3 py-2 font-mono text-sm"
+               placeholder="sk-...">
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-medium">Budget cap per run (USD; 0 = disabled)</span>
+        <input type="number" step="0.1" x-model.number="cfg.budget_usd"
+               class="mt-1 w-full border rounded-lg px-3 py-2">
+      </label>
+    </div>
+
+    <div class="flex justify-end gap-3">
+      <button @click="reload()" class="px-4 py-2 rounded-lg border border-slate-300 bg-white text-sm">Reset</button>
+      <button @click="saveConfig()" class="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium">Save configuration</button>
+    </div>
+  </section>
+
+
+  <!-- ▓▓▓▓▓▓ RUN ▓▓▓▓▓▓ -->
+  <section x-show="tab==='run'" class="space-y-6">
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5 space-y-4">
+      <h2 class="font-semibold text-lg">🚀 New evaluation run</h2>
+
+      <div class="grid md:grid-cols-4 gap-4">
+        <label class="block">
+          <span class="text-sm font-medium">Target RAG</span>
+          <select x-model="run.target" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="naive">Naive (flat index baseline)</option>
+            <option value="agentic">Agentic (per-UA router)</option>
+          </select>
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-medium">Tier</span>
+          <select x-model="run.tier" class="mt-1 w-full border rounded-lg px-3 py-2">
+            <option value="reference">reference (134)</option>
+            <option value="medium">medium (134)</option>
+            <option value="advanced">advanced (134)</option>
+            <option value="all">all (402)</option>
+          </select>
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-medium">Parallel workers</span>
+          <input type="number" min="1" max="16" x-model.number="run.workers"
+                 class="mt-1 w-full border rounded-lg px-3 py-2">
+        </label>
+
+        <label class="block">
+          <span class="text-sm font-medium">Limit (optional)</span>
+          <input type="number" min="0" x-model.number="run.limit"
+                 class="mt-1 w-full border rounded-lg px-3 py-2" placeholder="all">
+        </label>
+      </div>
+
+      <!-- Mode selector, explicit about what Mock means -->
+      <div class="flex items-center gap-3 pt-2">
+        <span class="text-sm font-medium">Mode:</span>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="radio" name="mode" :checked="!run.mock" @change="run.mock=false">
+          <span>🟢 <b>Real</b> — run the selected target RAG (requires API key / Ollama)</span>
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="radio" name="mode" :checked="run.mock" @change="run.mock=true">
+          <span>🟡 <b>Mock (dry run)</b> — fakes perfect answers, tests the evaluator only</span>
+        </label>
+      </div>
+
+      <!-- Warning banner when mock is on -->
+      <div x-show="run.mock" x-cloak
+           class="bg-amber-50 border border-amber-300 rounded-lg p-3 text-sm text-amber-900">
+        ⚠ <b>Mock mode is ON.</b> Results will be ~1.0 on every metric because the
+        mock returns <code>ground_truth</code> verbatim and cites <code>must_cite</code> directly.
+        This validates the <em>evaluator pipeline</em>, NOT the <em>target RAG</em>.
+        Switch to <b>Real</b> to evaluate the selected target.
+      </div>
+
+      <div class="flex flex-wrap gap-4 pt-2">
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" x-model="run.ragas">
+          <span>Ragas (LLM-judge metrics — slower, costs judge API calls)</span>
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" x-model="run.no_bertscore">
+          <span>Skip BERTScore (downloads model)</span>
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" x-model="run.no_sbert">
+          <span>Skip SBERT cosine (downloads model)</span>
+        </label>
+      </div>
+
+      <div class="flex justify-end">
+        <button @click="startRun()" :disabled="currentRun && currentRun.status==='running'"
+                class="px-5 py-2.5 rounded-lg bg-emerald-600 text-white font-medium disabled:bg-slate-300">
+          ▶ Start run
+        </button>
+      </div>
+    </div>
+
+    <!-- Live console -->
+    <div x-show="currentRun" class="bg-slate-900 text-slate-100 rounded-xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-sm text-slate-300">
+          <span class="font-mono" x-text="currentRun?.id"></span>
+          <span class="ml-2 px-2 py-0.5 rounded text-xs"
+                :class="statusColor(currentRun?.status)"
+                x-text="currentRun?.status"></span>
+          <span x-show="currentRun?.gate" class="ml-2 px-2 py-0.5 rounded text-xs font-bold"
+                :class="currentRun?.gate==='PASS' ? 'bg-emerald-600' : 'bg-rose-600'"
+                x-text="'GATE ' + currentRun?.gate"></span>
+        </div>
+        <div class="flex gap-2">
+          <button @click="cancelRun(currentRun.id)"
+                  x-show="currentRun?.status==='running' || currentRun?.status==='pending'"
+                  class="text-xs bg-rose-500 text-white px-2 py-1 rounded">■ Cancel</button>
+          <button @click="tab='dashboard'; loadRun(currentRun.id)"
+                  x-show="['done','failed','cancelled'].includes(currentRun?.status)"
+                  class="text-xs bg-white text-slate-900 px-2 py-1 rounded">View dashboard →</button>
+        </div>
+      </div>
+      <pre class="text-xs font-mono leading-5 overflow-auto max-h-[60vh]" x-ref="console" x-text="consoleBuffer"></pre>
+    </div>
+  </section>
+
+
+  <!-- ▓▓▓▓▓▓ DASHBOARD ▓▓▓▓▓▓ -->
+  <section x-show="tab==='dashboard'" class="space-y-6">
+
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-lg">📊 Evaluation dashboard</h2>
+        <div class="flex items-center gap-2">
+          <select x-model="selectedRunId" @change="loadRun(selectedRunId)"
+                  class="border rounded-lg px-3 py-1.5 text-sm">
+            <option value="">— select a run —</option>
+            <template x-for="r in runs" :key="r.id">
+              <option :value="r.id" x-text="r.id + '  [' + r.tier + (r.mock ? ' · MOCK' : '') + ']  ' + (r.gate || r.status)"></option>
+            </template>
+          </select>
+          <button @click="refreshRuns()" class="text-sm border rounded-lg px-3 py-1.5">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div x-show="!selectedReport" class="text-sm text-slate-500 italic">
+        No run selected — pick one above or start a new run.
+      </div>
+
+      <template x-if="selectedReport">
+        <div class="space-y-6">
+
+          <!-- MOCK warning banner on mock runs -->
+          <div x-show="selectedRun?.mock"
+               class="bg-amber-100 border-2 border-amber-400 rounded-lg p-4 text-amber-900 font-semibold">
+            ⚠ <span class="uppercase tracking-wider">Mock run</span> — these results are a dry-run of the
+            <em>evaluator pipeline</em>. The mock returns <code>ground_truth</code> verbatim, so all metrics
+            are artificially ~1.0. <b>This does NOT measure the target RAG.</b>
+          </div>
+
+          <!-- overall pass/fail banner -->
+          <div class="p-4 rounded-lg"
+               :class="selectedRun?.gate==='PASS' ? 'bg-emerald-50 border border-emerald-200' : 'bg-rose-50 border border-rose-200'">
+            <span class="font-bold text-lg"
+                  :class="selectedRun?.gate==='PASS' ? 'text-emerald-700' : 'text-rose-700'"
+                  x-text="selectedRun?.gate==='PASS' ? '✓ All gates passed' : '✗ Gate failed'"></span>
+            <span class="text-sm text-slate-600 ml-3">
+              run <span class="font-mono" x-text="selectedRun?.id"></span>
+              • tier <span class="font-semibold" x-text="selectedRun?.tier"></span>
+              • started <span x-text="selectedRun?.started_at"></span>
+              <span x-show="selectedRun?.mock" class="ml-2 bg-amber-200 text-amber-900 px-2 py-0.5 rounded text-xs font-bold">MOCK</span>
+            </span>
+          </div>
+
+          <!-- per-tier KPI cards -->
+          <template x-for="(rep, tier) in selectedReport" :key="tier">
+            <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
+              <h3 class="font-semibold mb-3 flex items-center gap-2">
+                <span class="uppercase text-xs tracking-wider bg-slate-900 text-white px-2 py-0.5 rounded" x-text="tier"></span>
+                <span class="text-sm text-slate-500" x-text="rep.n_pairs + ' pairs'"></span>
+              </h3>
+
+              <!-- KPI grid -->
+              <div class="grid md:grid-cols-4 gap-3">
+                <template x-for="kpi in kpisForTier(tier, rep)" :key="kpi.name">
+                  <div class="bg-white rounded-lg p-3 border border-slate-200">
+                    <div class="text-xs text-slate-500" x-text="kpi.name"></div>
+                    <div class="flex items-baseline gap-2 mt-1">
+                      <div class="text-lg font-bold" x-text="kpi.value"></div>
+                      <div class="text-xs" :class="kpi.pass===true ? 'text-emerald-600' : kpi.pass===false ? 'text-rose-600' : 'text-slate-400'"
+                           x-text="kpi.badge"></div>
+                    </div>
+                    <div class="text-xs text-slate-400 mt-0.5" x-text="'threshold ' + kpi.threshold"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- charts -->
+              <div class="grid md:grid-cols-2 gap-4 mt-4">
+                <div class="bg-white rounded-lg p-3 border border-slate-200">
+                  <div class="text-xs font-medium text-slate-500 mb-2">Per-class F1 (routing)</div>
+                  <canvas :id="'chart-f1-' + tier" height="140"></canvas>
+                </div>
+                <div class="bg-white rounded-lg p-3 border border-slate-200">
+                  <div class="text-xs font-medium text-slate-500 mb-2">Metric radar (0→1)</div>
+                  <canvas :id="'chart-radar-' + tier" height="140"></canvas>
+                </div>
+              </div>
+
+              <!-- downloads -->
+              <div class="mt-3 flex gap-3 text-xs">
+                <a :href="'/api/runs/' + selectedRun.id + '/traces.csv'"
+                   class="text-blue-600 hover:underline">⬇ traces.csv</a>
+                <a :href="'/api/runs/' + selectedRun.id + '/report.html'" target="_blank"
+                   class="text-blue-600 hover:underline">↗ full HTML report</a>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+    </div>
+  </section>
+
+
+  <!-- ▓▓▓▓▓▓ HISTORY ▓▓▓▓▓▓ -->
+  <section x-show="tab==='history'" class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+    <h2 class="font-semibold text-lg mb-4">🗂  Run history</h2>
+    <table class="w-full text-sm">
+      <thead class="text-left border-b border-slate-200">
+        <tr class="text-slate-500">
+          <th class="py-2">ID</th><th>Tier</th><th>Started</th><th>Finished</th>
+          <th>Status</th><th>Gate</th><th>Ragas</th><th>Mock</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-for="r in runs" :key="r.id">
+          <tr class="border-b border-slate-100 hover:bg-slate-50">
+            <td class="py-2 font-mono text-xs" x-text="r.id"></td>
+            <td x-text="r.tier"></td>
+            <td class="text-xs" x-text="r.started_at"></td>
+            <td class="text-xs" x-text="r.finished_at || '—'"></td>
+            <td><span class="px-2 py-0.5 rounded text-xs" :class="statusColor(r.status)" x-text="r.status"></span></td>
+            <td><span x-show="r.gate" class="px-2 py-0.5 rounded text-xs font-bold"
+                      :class="r.gate==='PASS' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'"
+                      x-text="r.gate"></span></td>
+            <td x-text="r.ragas ? '✓' : ''"></td>
+            <td><span x-show="r.mock" class="bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded text-xs font-bold">MOCK</span></td>
+            <td class="text-right">
+              <button @click="tab='dashboard'; selectedRunId=r.id; loadRun(r.id)" class="text-blue-600 text-xs hover:underline">open</button>
+              <button @click="deleteRun(r.id)" class="text-rose-600 text-xs hover:underline ml-2">delete</button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="runs.length===0">
+          <td colspan="9" class="text-center py-6 text-slate-400 italic">No runs yet — start one from the Run tab.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="text-xs text-slate-400 text-center pt-6">
+    Activiity • Agentic RAG Evaluation Control Panel
+  </footer>
+
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

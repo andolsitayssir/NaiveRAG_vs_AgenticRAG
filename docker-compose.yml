@@ -1,0 +1,41 @@
+﻿services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  chat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env
+    environment:
+      ACTIVIITY_DATA_DIR: /app/data
+      ACTIVIITY_BASELINE_PERSIST: /app/baseline/.index
+      QDRANT_URL: http://qdrant:6333
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      HF_TOKEN: ${HF_TOKEN}
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-hf-inference}
+      ST_EMBED_DEVICE: ${ST_EMBED_DEVICE:-cpu}
+    depends_on:
+      - qdrant
+    volumes:
+      - ./data:/app/data
+      - baseline_index:/app/baseline/.index
+      # Persist Hugging Face model downloads across container recreations
+      - hf_cache:/root/.cache/huggingface
+      # Live-mount source code so edits apply without rebuild
+      - ./eval:/app/eval
+      - ./activiity:/app/activiity
+      - ./baseline:/app/baseline
+
+volumes:
+  baseline_index:
+  qdrant_storage:
+  hf_cache:

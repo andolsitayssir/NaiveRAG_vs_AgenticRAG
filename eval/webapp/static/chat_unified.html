@@ -1,0 +1,322 @@
+﻿<!doctype html>
+<html lang="fr">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Activiity Chat</title>
+  <meta name="description" content="Chat unifie RAG naif / agentique avec comparaison multi-modeles et RAGAS">
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <link rel="stylesheet" href="/static/chat_mono.css?v=5">
+</head>
+
+<body x-data="unifiedChat()" x-init="init()" x-cloak>
+
+  <div class="shell">
+
+    <!-- ================= Header ================= -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="models-wrap">
+          <button type="button" class="btn btn-dark" @click="panelOpen = !panelOpen"
+            :class="{ 'is-open': panelOpen }">
+            Modeles
+            <span class="count-pill" x-text="selectedSynth.length"></span>
+          </button>
+
+          <!-- Models panel -->
+          <div class="models-panel" x-show="panelOpen" @click.outside="panelOpen = false" x-transition.opacity>
+            <div class="panel-section">
+              <div class="panel-title">Modeles de synthese</div>
+              <p class="panel-hint">Jusqu'a 3 modeles. Chaque modele genere une reponse pour la meme question.</p>
+
+              <template x-for="m in synthOptions" :key="m.value">
+                <label class="check-row" :class="{ 'is-disabled': !isSynthChecked(m.value) && selectedSynth.length >= maxSynth }">
+                  <input type="checkbox" :checked="isSynthChecked(m.value)"
+                    @change="toggleSynth(m.value)" :disabled="!isSynthChecked(m.value) && selectedSynth.length >= maxSynth">
+                  <span class="check-label" x-text="m.label"></span>
+                  <span class="check-tag" x-text="m.custom ? 'perso' : ''"></span>
+                  <button type="button" class="remove-btn" x-show="m.custom"
+                    @click.prevent="removeCustomSynth(m.value)" title="Retirer">x</button>
+                </label>
+              </template>
+
+              <div class="custom-add">
+                <input type="text" class="field" x-model="customSynthInput"
+                  placeholder="id OpenRouter personnalise (ex: org/modele)" @keydown.enter.prevent="addCustomSynth()">
+                <button type="button" class="btn btn-outline btn-sm" @click="addCustomSynth()">Ajouter</button>
+              </div>
+            </div>
+
+            <div class="panel-section panel-divider">
+              <div class="panel-title">Modele de routage <span class="panel-sub">(agentique)</span></div>
+
+              <template x-for="m in routerOptions" :key="m.value">
+                <label class="check-row">
+                  <input type="radio" name="router-model" :value="m.value" x-model="routerModel">
+                  <span class="check-label" x-text="m.label"></span>
+                </label>
+              </template>
+
+              <div class="custom-add">
+                <input type="text" class="field" x-model="customRouterInput"
+                  placeholder="id OpenRouter personnalise (routage)" @change="applyCustomRouter()">
+                <button type="button" class="btn btn-outline btn-sm" @click="applyCustomRouter()">Utiliser</button>
+              </div>
+              <p class="panel-hint mono-hint" x-show="routerModel && !isKnownRouter(routerModel)"
+                x-text="'Routage actuel : ' + routerModel"></p>
+            </div>
+
+            <div class="panel-section panel-divider">
+              <div class="panel-title">Cle API OpenRouter <span class="panel-sub">(optionnelle)</span></div>
+              <input type="password" class="field" x-model="apiKeyInput" placeholder="sk-or-...">
+              <button type="button" class="btn btn-outline btn-sm save-key-btn" @click="saveKey()">Enregistrer la cle</button>
+              <p class="panel-hint" x-text="sessionKey ? 'Cle de session active (' + maskedKey() + ')' : 'La cle du serveur sera utilisee'"></p>
+            </div>
+
+            <div class="panel-footer">
+              <button type="button" class="btn btn-dark" @click="panelOpen = false">Terminer</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="brand">
+          <span class="brand-name">Activiity Chat</span>
+          <a href="/" class="brand-link">Tableau de bord</a>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="arch-toggle" role="group" aria-label="Architecture RAG">
+          <button type="button" class="toggle-btn" :class="{ active: target === 'naive' }"
+            @click="setTarget('naive')">RAG Naif</button>
+          <button type="button" class="toggle-btn" :class="{ active: target === 'agentic' }"
+            @click="setTarget('agentic')">RAG Agentique</button>
+        </div>
+        <button type="button" class="btn btn-outline hist-btn" @click="toggleHistory()"
+          :class="{ 'is-open': historyOpen }">
+          Historique
+          <span class="count-pill inv" x-text="history.length"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ================= Body ================= -->
+    <div class="main">
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <span>Paires de reference</span>
+          <button type="button" class="icon-btn" title="Recharger" @click="loadPairs()">R</button>
+        </div>
+
+        <template x-for="group in tiers" :key="group.key">
+          <div class="tier-group">
+            <button type="button" class="tier-head" @click="group.open = !group.open">
+              <span class="tier-arrow" x-text="group.open ? '-' : '+'"></span>
+              <span class="tier-name" x-text="group.label"></span>
+              <span class="tier-count" x-text="group.pairs.length"></span>
+            </button>
+            <div class="tier-pairs" x-show="group.open">
+              <template x-for="p in group.pairs" :key="group.key + p.id">
+                <button type="button" class="pair-item" :class="{ selected: selectedPairId === group.key + '/' + p.id }"
+                  @click="selectPair(group.key, p.id)">
+                  <span class="pair-id" x-text="p.id"></span>
+                  <span class="pair-unit" x-text="p.bucket + (p.unit_name ? ' - ' + p.unit_name : '')"></span>
+                </button>
+              </template>
+              <div class="pair-empty" x-show="group.pairs.length === 0">Aucune paire</div>
+            </div>
+          </div>
+        </template>
+      </aside>
+
+      <!-- Conversation -->
+      <section class="chat-area">
+
+        <div class="messages" x-ref="messages">
+
+          <div class="empty-state" x-show="turns.length === 0">
+            <div class="empty-title">Posez une question</div>
+            <p class="empty-text">
+              Selectionnez une paire dans le panneau lateral ou saisissez votre propre question.<br>
+              Architecture activee : <strong x-text="target === 'naive' ? 'RAG Naif' : 'RAG Agentique'"></strong>
+            </p>
+          </div>
+
+          <template x-for="(turn, ti) in turns" :key="ti">
+            <div class="turn">
+              <div class="user-msg">
+                <div class="msg-meta">
+                  <span x-text="targetLabel()"></span>
+                  <span x-show="turn.pairId" x-text="turn.pairId"></span>
+                </div>
+                <div class="user-text" x-text="turn.question"></div>
+              </div>
+              <div class="ground-truth" x-show="turn.ground_truth">
+                <div class="gt-label">Reponse attendue</div>
+                <div class="gt-text" x-text="turn.ground_truth"></div>
+              </div>
+              <div class="answers-grid" :class="'cols-' + Math.max(turn.results.length, 1)">
+                <template x-for="(r, ri) in turn.results" :key="ri">
+                  <div class="answer-card">
+                    <div class="answer-head">
+                      <span class="model-name" x-text="r.modelLabel"></span>
+                      <span class="status" x-text="statusText(r)"></span>
+                    </div>
+
+                    <div class="answer-body">
+                      <template x-if="r.loading">
+                        <div class="loading-lines">
+                          <div class="line w100"></div>
+                          <div class="line w80"></div>
+                          <div class="line w60"></div>
+                        </div>
+                      </template>
+                      <template x-if="!r.loading && r.error">
+                        <div class="answer-error" x-text="r.error"></div>
+                      </template>
+                      <template x-if="!r.loading && !r.error && r.answer">
+                        <div class="answer-text" x-text="r.answer"></div>
+                      </template>
+                    </div>
+
+                    <!-- Agent trace -->
+                    <div class="trace" x-show="target === 'agentic' && ((r.tools_called && r.tools_called.length) || r.iterations > 0)">
+                      <span class="trace-item" x-text="(r.tools_called || []).join(', ')"></span>
+                      <span class="trace-item muted" x-show="r.units_called && r.units_called.length"
+                        x-text="'unites : ' + (r.units_called || []).join(', ')"></span>
+                      <span class="trace-item" x-show="r.iterations > 0" x-text="r.iterations + ' iteration(s)'"></span>
+                    </div>
+
+                    <!-- RAGAS -->
+                    <div class="ragas" x-show="!r.loading && !r.error && r.answer">
+                      <div class="ragas-head">
+                        <span>RAGAS</span>
+                        <span class="ragas-state" x-show="r.ragasLoading" x-text="'evaluation en cours...'"></span>
+                        <span class="ragas-state err" x-show="r.ragasError" x-text="'echec'"></span>
+                      </div>
+                      <div class="ragas-grid" x-show="r.ragas">
+                        <div class="ragas-cell">
+                          <span class="ragas-label" title="La reponse reste fidele aux chunks recuperes (pas d'hallucination)">Faithfulness</span>
+                          <span class="ragas-val" x-text="fmt(r.ragas?.faithfulness)"></span>
+                        </div>
+                        <div class="ragas-cell">
+                          <span class="ragas-label" title="La reponse correspond a l'intention de la question">Answer Relevancy</span>
+                          <span class="ragas-val" x-text="fmt(r.ragas?.answer_relevancy)"></span>
+                        </div>
+                        <div class="ragas-cell">
+                          <span class="ragas-label" title="Les chunks recuperes sont pertinents">Context Precision</span>
+                          <span class="ragas-val" x-text="fmt(r.ragas?.context_precision)"></span>
+                        </div>
+                        <div class="ragas-cell">
+                          <span class="ragas-label" title="Le contexte couvre le ground truth">Context Recall</span>
+                          <span class="ragas-val" x-text="fmt(r.ragas?.context_recall)"></span>
+                        </div>
+                        
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+
+            </div>
+          </template>
+        </div>
+
+        <!-- Composer -->
+        <div class="composer">
+          <div class="error-banner" x-show="error" x-text="error"></div>
+          <div class="composer-row">
+            <textarea class="composer-input" rows="2" x-model="question"
+              placeholder="Saisissez votre question, ou choisissez une paire dans le panneau lateral..."
+              @keydown.enter.exact.prevent="ask()"></textarea>
+            <button type="button" class="btn btn-dark send-btn" @click="ask()"
+              :disabled="loading || !question.trim()">
+              <span x-show="!loading" x-text="selectedSynth.length > 1 ? 'Interroger (' + selectedSynth.length + ')' : 'Envoyer'"></span>
+              <span x-show="loading">Traitement...</span>
+            </button>
+          </div>
+          <div class="composer-meta">
+            <span x-text="selectedSynth.length + ' modele(s) de synthese'"></span>
+            <span x-show="target === 'agentic'" x-text="'routage : ' + routerShort()"></span>
+            <span x-show="groundTruth" x-text="'paire chargee : ' + (selectedPairId || '')"></span>
+            <span style="margin-left:auto">UI v5</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ================= History panel ================= -->
+  <aside class="history-panel" x-show="historyOpen" :class="{ open: historyOpen }">
+    <div class="hist-head">
+      <span class="hist-title">Historique</span>
+      <div class="hist-head-actions">
+        <button type="button" class="btn btn-outline btn-sm" @click="clearHistory()">Effacer</button>
+        <button type="button" class="icon-btn" title="Fermer" @click="closeHistory()">x</button>
+      </div>
+    </div>
+
+    <div class="hist-list">
+      <template x-for="(h, hi) in history" :key="h.ts + '-' + hi">
+        <div class="hist-entry">
+          <div class="hist-top">
+            <span class="hist-time" x-text="fmtTime(h.ts)"></span>
+            <span class="hist-target"
+              :class="h.target === 'naive' ? 't-naive' : 't-agentic'"
+              x-text="h.target === 'naive' ? 'Naif' : 'Agentique'"></span>
+            <span class="hist-pair" x-show="h.pairId" x-text="h.pairId"></span>
+          </div>
+
+          <div class="hist-question" x-text="h.question"></div>
+
+          <div class="hist-config">
+            <div class="cfg-line">
+              <span class="cfg-key">Synthese</span>
+              <span class="cfg-val" x-text="(h.synthModels || []).join(',  ')"></span>
+            </div>
+            <div class="cfg-line" x-show="h.target === 'agentic'">
+              <span class="cfg-key">Routage</span>
+              <span class="cfg-val" x-text="h.routerModel"></span>
+            </div>
+          </div>
+
+          <div class="hist-results">
+            <template x-for="(r, ri) in h.results" :key="ri">
+              <div class="hist-result-row">
+                <div class="hr-line">
+                  <span class="hr-model" x-text="r.modelLabel || r.model"></span>
+                  <span class="hr-status" x-text="r.error ? 'Erreur' : ((r.latency ?? '-') + ' s')"></span>
+                </div>
+                <div class="hr-ragas" x-show="!r.error && r.ragas">
+                  <span>Faithfulness <b x-text="fmt(r.ragas?.faithfulness)"></b></span>
+                  <span>Relevancy <b x-text="fmt(r.ragas?.answer_relevancy)"></b></span>
+                  <span>Ctx Precision <b x-text="fmt(r.ragas?.context_precision)"></b></span>
+                  <span>Ctx Recall <b x-text="fmt(r.ragas?.context_recall)"></b></span>
+                  <span>Correctness <b x-text="fmt(r.ragas?.answer_correctness)"></b></span>
+                </div>
+                <div class="hr-ragas na" x-show="r.error" x-text="r.error || ''"></div>
+              </div>
+            </template>
+          </div>
+
+          <div class="hist-actions">
+            <button type="button" class="btn btn-outline btn-sm" @click="reuseQuestion(h)">Reutiliser la question</button>
+          </div>
+        </div>
+      </template>
+
+      <div class="hist-empty" x-show="history.length === 0">Aucune question pour le moment</div>
+    </div>
+  </aside>
+  <div class="history-backdrop" x-show="historyOpen" @click="closeHistory()"></div>
+
+  <div class="toast-layer" x-ref="toasts"></div>
+
+  <script src="/static/chat_unified.js?v=5"></script>
+</body>
+
+</html>

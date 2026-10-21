@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Activiity Chat — RAG Agentique</title>
+  <meta name="description" content="Interface de chat multi-modeles pour evaluer le pipeline RAG agentique">
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div x-data="chatPage('agentic')" x-init="init()" x-cloak class="app-container">
+
+  <!-- ─── Header ──────────────────────────────────────────── -->
+  <header class="app-header">
+    <div>
+      <h1>⚡ Activiity — RAG Agentique</h1>
+      <p class="subtitle">Comparaison multi-modeles · Trace agent + RAGAS</p>
+    </div>
+    <nav class="nav-links">
+      <a href="/chat/naive" class="nav-link"> Chat naif</a>
+      <a href="/" class="nav-link"> Tableau de bord</a>
+    </nav>
+  </header>
+
+
+
+  <!-- ─── Agentic Router Config ──────────────────────────── -->
+  <section class="card">
+    <div class="card-title"><span class="icon"></span> Configuration agentique</div>
+    <div class="model-slots" style="grid-template-columns: 1fr 1fr;">
+      <div class="model-slot active">
+        <div class="slot-label">
+          <span class="slot-number" style="background: #f59e0b;">R</span>
+          Modèle routeur
+        </div>
+        <select x-model="routerModel" class="form-select">
+          <template x-for="m in agenticRouterOptions" :key="m.value">
+            <option :value="m.value" x-text="m.label"></option>
+          </template>
+        </select>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ─── Synthesis Model Selection ──────────────────────── -->
+  <section class="card">
+    <div class="card-title"><span class="icon"></span> Modeles de synthese</div>
+    <p class="info-text" style="margin-bottom: 14px;">Selectionnez jusqu a 3 modeles de synthese a comparer. Chaque modele genere une reponse depuis le meme contexte.</p>
+
+    <div class="model-slots">
+      <template x-for="(slot, idx) in selectedModels" :key="idx">
+        <div class="model-slot" :class="{ 'active': slot !== '' }">
+          <div class="slot-label">
+            <span class="slot-number" :style="'background:' + modelColor(idx)" x-text="idx + 1"></span>
+            <span x-text="idx === 0 ? 'Premier Modèle de Synthese ' : (idx === 1 ? 'Deuxieme modèle de Synthese' : 'Troisième modèle de Synthese')"></span>
+          </div>
+          <select x-model="selectedModels[idx]" class="form-select" :disabled="modelsSaved">
+            <option value="">— Aucun —</option>
+            <template x-for="m in availableModels" :key="m.value">
+              <option :value="m.value" x-text="m.label"></option>
+            </template>
+          </select>
+        </div>
+      </template>
+    </div>
+
+    <div style="margin-top: 16px; display: flex; gap: 8px; align-items: center;">
+      <template x-if="!modelsSaved">
+        <button @click="saveModels()" class="btn btn-primary btn-sm" :disabled="activeModelCount === 0">
+           Enregistrer la selection
+        </button>
+      </template>
+      <template x-if="modelsSaved">
+        <button @click="resetModels()" class="btn btn-secondary btn-sm">
+           Changer de modeles
+        </button>
+      </template>
+      <span class="info-text" x-text="activeModelCount + ' modele(s) de synthese selectionne(s)'"></span>
+    </div>
+  </section>
+
+  <div class="grid" style="display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+    <!-- ─── Reference Pairs ────────────────────────────────── -->
+    <section class="card">
+      <div class="card-title"><span class="icon"></span> Paires de reference</div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button @click="loadChatPairs()" class="btn btn-secondary btn-sm">↻ Recharger</button>
+        <select x-model="selectedPair" @change="selectChatPair()" class="form-select" style="flex: 1;">
+          <option value="">Selectionner une paire...</option>
+          <template x-for="p in pairs" :key="p.id">
+            <option :value="p.id" x-text="p.id + ' — ' + p.bucket + (p.unit_name ? ' (' + p.unit_name + ')' : '')"></option>
+          </template>
+        </select>
+      </div>
+      <div class="info-text" style="margin-top: 8px;" x-text="pairs.length ? (pairs.length + ' paires chargees') : 'Aucune paire chargee'"></div>
+    </section>
+
+    <!-- ─── Question ───────────────────────────────────────── -->
+    <section class="card">
+      <div class="card-title"> Question</div>
+      <textarea x-model="question" rows="3" class="form-input" placeholder="Ecrivez votre question ou selectionnez une paire..."></textarea>
+       <div style="margin-top: 12px; display: flex; gap: 8px; align-items: center;">
+        <button @click="askChat()" :disabled="loading || !question || activeModelCount === 0"
+                class="btn btn-primary">
+          <span x-show="!loading" x-text="activeModelCount > 1 ? ' Interroger tous les modeles' : ' Interroger le modele'"></span>
+          <span x-show="loading" class="animate-pulse"> Traitement...</span>
+        </button>
+          </div>
+    </section>
+  </div>
+
+  <!-- ─── Error ──────────────────────────────────────────── -->
+  <div x-show="error" class="error-banner" x-text="error"></div>
+
+  <!-- ─── Results ────────────────────────────────────────── -->
+  <template x-if="hasAnyResult || ground_truth">
+    <section>
+      <!-- Ground Truth -->
+      <div x-show="ground_truth" class="ground-truth-bar">
+        <div class="gt-label"> Ground Truth </div>
+        <div class="gt-text" x-text="ground_truth"></div>
+      </div>
+
+      <!-- Model outputs grid -->
+      <div class="results-grid" :class="gridCols">
+        <template x-for="(r, idx) in results" :key="idx">
+          <template x-if="r !== null">
+            <div class="result-card">
+              <!-- Header -->
+              <div class="result-card-header">
+                <div class="model-name">
+                  <span class="model-badge" :style="'background:' + modelColor(idx)"></span>
+                  <span x-text="r.modelLabel"></span>
+                </div>
+                <span class="status-badge"
+                      :class="r.loading ? 'status-loading' : (r.error ? 'status-error' : 'status-done')"
+                      x-text="r.loading ? 'Traitement...' : (r.error ? 'Erreur' : r.latency + 's')"></span>
+              </div>
+
+              <!-- Body -->
+              <div class="result-card-body">
+                <template x-if="r.loading">
+                  <div>
+                    <div class="shimmer" style="width:100%"></div>
+                    <div class="shimmer" style="width:80%"></div>
+                    <div class="shimmer" style="width:60%"></div>
+                  </div>
+                </template>
+                <template x-if="r.error && !r.loading">
+                  <div class="answer-placeholder" style="color: var(--error);" x-text="r.error"></div>
+                </template>
+                <template x-if="r.answer && !r.loading">
+                  <div class="answer-text" x-text="r.answer"></div>
+                </template>
+                <template x-if="!r.answer && !r.loading && !r.error">
+                  <div class="answer-placeholder">Aucune reponse</div>
+                </template>
+              </div>
+
+              <!-- Agent Trace -->
+              <div x-show="(r.tools_called && r.tools_called.length > 0) || (r.units_called && r.units_called.length > 0) || r.iterations > 0" class="agent-trace">
+                <span class="trace-label">outils</span>
+                <template x-for="tool in r.tools_called" :key="tool">
+                  <span class="trace-tag" x-text="tool"></span>
+                </template>
+                <span class="trace-label">unités</span>
+                <template x-for="unit in r.units_called" :key="unit">
+                  <span class="trace-tag trace-unit" x-text="unit"></span>
+                </template>
+                <span x-show="r.iterations > 0" class="trace-iter" x-text="r.iterations + ' iteration(s)'"></span>
+              </div>
+
+              <!-- RAGAS Loading Skeleton -->
+              <template x-if="r.ragasLoading && !r.loading">
+                <div class="ragas-metrics ragas-loading-state">
+                  <div class="metrics-title">
+                    <span class="ragas-spinner"></span>
+                    Evaluation RAGAS en cours...
+                  </div>
+                  <div class="metrics-grid">
+                    <div class="metric-item"><div class="shimmer" style="width:60%;height:10px;margin:6px auto"></div><div class="shimmer" style="width:40%;height:16px;margin:4px auto"></div></div>
+                    <div class="metric-item"><div class="shimmer" style="width:60%;height:10px;margin:6px auto"></div><div class="shimmer" style="width:40%;height:16px;margin:4px auto"></div></div>
+                    <div class="metric-item"><div class="shimmer" style="width:60%;height:10px;margin:6px auto"></div><div class="shimmer" style="width:40%;height:16px;margin:4px auto"></div></div>
+                    <div class="metric-item"><div class="shimmer" style="width:60%;height:10px;margin:6px auto"></div><div class="shimmer" style="width:40%;height:16px;margin:4px auto"></div></div>
+                    <div class="metric-item"><div class="shimmer" style="width:60%;height:10px;margin:6px auto"></div><div class="shimmer" style="width:40%;height:16px;margin:4px auto"></div></div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- RAGAS Error -->
+              <template x-if="r.ragasError && !r.ragasLoading && !r.loading">
+                <div class="ragas-metrics ragas-error-state">
+                  <div class="metrics-title" style="color: var(--error);">⚠ Evaluation RAGAS echouee</div>
+                  <div class="info-text" style="color: var(--error); font-size: 0.78rem;" x-text="r.ragasError"></div>
+                </div>
+              </template>
+
+              <!-- RAGAS Metrics (loaded) -->
+              <template x-if="r.ragas && !r.ragasLoading && !r.loading">
+                <div class="ragas-metrics ragas-loaded-state">
+                  <div class="metrics-title">✓ Metriques RAGAS</div>
+                  <div class="metrics-grid">
+                    <div class="metric-item">
+                      <div class="metric-label">Faithfulness <span class="metric-info" title="La réponse reste fidèle aux chunks récupérés (pas d'hallucination).">i</span></div>
+                      <div class="metric-value" :class="metricClass(r.ragas.faithfulness)"
+                           x-text="formatMetric(r.ragas.faithfulness)"></div>
+                    </div>
+                    <div class="metric-item">
+                      <div class="metric-label">Relevancy <span class="metric-info" title="La réponse correspond bien à l'intention de la question.">i</span></div>
+                      <div class="metric-value" :class="metricClass(r.ragas.answer_relevancy)"
+                           x-text="formatMetric(r.ragas.answer_relevancy)"></div>
+                    </div>
+                    <div class="metric-item">
+                      <div class="metric-label metric-label-shift">Context Precision <span class="metric-info" title="Les chunks récupérés sont pertinents par rapport à la réponse attendue.">i</span></div>
+                      <div class="metric-value" :class="metricClass(r.ragas.context_precision)"
+                           x-text="formatMetric(r.ragas.context_precision)"></div>
+                    </div>
+                    <div class="metric-item">
+                      <div class="metric-label">Context Recall <span class="metric-info" title="Le contexte récupéré couvre toutes les informations nécessaires du ground truth.">i</span></div>
+                      <div class="metric-value" :class="metricClass(r.ragas.context_recall)"
+                           x-text="formatMetric(r.ragas.context_recall)"></div>
+                    </div>
+                    <div class="metric-item">
+                      <div class="metric-label">Correctness <span class="metric-info" title="La réponse correspond factuellement et sémantiquement au ground truth.">i</span></div>
+                      <div class="metric-value" :class="metricClass(r.ragas.answer_correctness)"
+                           x-text="formatMetric(r.ragas.answer_correctness)"></div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+        </template>
+      </div>
+    </section>
+  </template>
+
+  <!-- ─── Footer ─────────────────────────────────────────── -->
+  <footer style="text-align: center; padding: 24px 0; color: var(--text-muted); font-size: 0.75rem;">
+    Activiity — Chat RAG Agentique · Comparaison multi-modeles
+  </footer>
+</div>
+
+<script src="/static/chat.js?v=3"></script>
+</body>
+</html>

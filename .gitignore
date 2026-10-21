@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.eggs/
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Project — local-only state we should NOT push
+baseline/.index/                  # naive RAG persisted vector store
+.qdrant_storage/                  # Qdrant data dir (large + transient)
+.ragas_cache/
+
+
+# Webapp runtime data
+eval/webapp/runs/             
+eval/webapp/config.json           
+
+# Eval extracted text (regeneratable)
+docs/_extracted/
+
+# Reports — large + per-run, not part of source
+/reports/
+reports/*/traces.csv
+reports/*/ragas_per_pair_*.csv
+
+# Secrets / env
+.env
+.env.local
+*.pem
+*.key
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
